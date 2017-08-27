@@ -159,11 +159,11 @@
 
 (defun print-gcodes (gcodes &optional (stream t))
   (loop for gcode in gcodes
-        do (format stream "~a " (first gcode))
+        do (format stream "~a" (first gcode))
            (loop for param in (rest gcode)
                  do (if (numberp param)
-                        (format stream "~,3f " param)
-                        (format stream "~a" param)))
+                        (format stream "~,3f" param)
+                        (format stream " ~a" param)))
            (format stream "~%")))
 
 (with-open-file (s "~/Desktop/logo.gcode" :if-does-not-exist :create
