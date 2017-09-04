@@ -1,15 +1,15 @@
-(defun first-round (l h lh e f mid)
+(defun first-round (l h lh e f mid &optional (temp 190))
   (let* ((w (* 2 h))
          (r (* 2 (+ l w)))
          (skirt 10)
          (lw (* e 6)))
     (values
      `((m107) ; Fan off
-       (m104 :s 203) ; Set hot end temp
+       (m104 :s ,temp) ; Set hot end temp
        (g28)
        (g92 :x 0 :y 0 :z 0 :e 0) ; Prep nozzle
        (g1 :z 5 :f 1000) ; Lift nozzle
-       (m109 :s 203) ; wait for hot end temperature to be reached
+       (m109 :s ,temp) ; wait for hot end temperature to be reached
        (g21) ; set units to millimeters
        (g90) ; use absolute coordinates
        (m82) ; use absolute distances for extrusion
@@ -21,20 +21,27 @@
        (g1 :x ,(- mid h skirt) :e ,(* e (+ w (* 6 skirt) l w)))
        (g1 :y ,(- mid (/ l 2) skirt) :e ,(* e (+ w (* 8 skirt) l w l)))
        (g92 :e 0) ; Skirt done
-       (g1 :x ,(- mid h lw) :y ,(- mid (/ l 2) lw) :z lh :f ,f)
+       (g1 :x ,(- mid h lw) :y ,(- mid (/ l 2) lw) :z ,lh :f ,f)
        (g1 :x ,(+ mid h lw)       :e ,(* e (+ w (* 2 lw))))
        (g1 :y ,(+ mid (/ l 2) lw) :e ,(* e (+ w (* 4 lw) l)))
        (g1 :x ,(- mid h lw)       :e ,(* e (+ w (* 6 lw) l w)))
        (g1 :y ,(- mid (/ l 2) lw) :e ,(* e (+ w (* 8 lw) l w l)))
        (g92 :e 0) ; Round one done
-       (g1 :x ,(- mid h) :y ,(- mid (/ l 2)) :z 0 :f ,f)
+       (g1 :x ,(- mid h) :y ,(- mid (/ l 2)) :z ,0 :f ,f)
        (g1 :x ,(+ mid h) :y ,(- mid (/ l 2)) :z ,(* lh (/ w r)) :e ,(* (/ w r) e w))
        (g1 :x ,(+ mid h) :y ,(+ mid (/ l 2)) :z ,(* lh (/ (+ w l) r))
            :e ,(+ (* (/ w r) e w) (* (/ (+ w l) r) e l)))
        (g1 :x ,(- mid h) :y ,(+ mid (/ l 2)) :z ,(* lh (/ (+ w l w) r))
            :e ,(+ (* (/ w r) e w) (* (/ (+ w l) r) e l) (* (/ (+ w l w) r) e w)))
        (g1 :x ,(- mid h) :y ,(- mid (/ l 2)) :z ,lh
-           :e ,(+ (* (/ w r) e w) (* (/ (+ w l) r) e l) (* (/ (+ w l w) r) e w) (* e l))))
+           :e ,(+ (* (/ w r) e w) (* (/ (+ w l) r) e l) (* (/ (+ w l w) r) e w) (* e l)))
+       (g92 :e 0) ; Round three done
+       (g1 :x ,(+ (- mid h) lw) :y ,(+ (- mid (/ l 2)) lw) :z ,lh :f ,f)
+       (g1 :x ,(- (+ mid h) lw)       :e ,(* e (- w (* 2 lw))))
+       (g1 :y ,(- (+ mid (/ l 2)) lw) :e ,(* e (- (+ w l) (* 4 lw))))
+       (g1 :x ,(+ (- mid h) lw)       :e ,(* e (- (+ w l w) (* 6 lw))))
+       (g1 :y ,(+ (- mid (/ l 2)) lw) :e ,(* e (- (+ w l w l) (* 8 lw))))
+       (g1 :x ,(- mid h) :y ,(- mid (/ l 2)) :z ,lh))
      (- mid h)
      lh)))
 
@@ -89,7 +96,6 @@
         (op2 (if (< (+ z h) (/ l (sqrt 2)))
                  #'+
                  #'-)))
-    ;; TODO funcall op0 needs to shift here at
     (let ((lin-x (nreverse (cons (+ mid mid (- x) (funcall op2 (/ (funcall op0 lh) 2)))
                                  (remove-if #'(lambda (p) (> (abs (- p mid)) (abs (- x mid))))
                                             (linspace (funcall op0 mid (/ l (sqrt 2)))
@@ -136,26 +142,35 @@
     (m104 :s 0) ; turn hot end off
     (g28 :x 0))) ; home x axis
 
-(defun full-gcode ()
-  (let ((l 100)
-        (h 10)
-        (lh 0.35)
-        (e 0.14)
-        (fl 1200)
-        (fh 3300)
-        (mid 100)
-        (segs 8)
-        (y-segs 5))
+(defun inner-round (x l e f mid)
+  (let ((lw (* 6 e)))
+    (let ((x0 (+ x lw))
+          (y0 (+ (- mid (/ l 2)) lw))
+          (x1 (- (+ x (* 2 (abs (- mid x)))) (/ lw 2)))
+          (y2 (- (+ mid (/ l 2)) lw)))
+        `((g92 :e 0)
+          (g1 :x ,x0 :y ,y0 :f ,f)
+          (g1 :x ,x1 :e ,(* e (+ (abs (- x1 x0)))))
+          (g1 :y ,y2 :e ,(* e (+ (abs (- x1 x0)) (abs (- y2 y0)))))
+          (g1 :x ,x0 :e ,(* e (+ (abs (- x1 x0)) (abs (- y2 y0)) (abs (- x1 x0)))))
+          (g1 :y ,y0 :e ,(* e (+ (abs (- x1 x0)) (abs (- y2 y0)) (abs (- x1 x0)) (abs (- y2 y0)))))
+          (g1 :x ,x :y ,(- mid (/ l 2)))))))
+
+(defun full-gcode (l h lh e fl fh mid segs y-segs &key (double-wall t))
     (multiple-value-bind (first-gcode first-x first-z)
         (first-round l h lh e fl mid)
       (append first-gcode
-              '((m106 :s 250)) ; Get cooling fan going
+              ;;'((m106 :s 250)) ; Get cooling fan going
               (loop with (gcode x z) = (multiple-value-list
                                         (spir first-x first-z l h lh e fl fh mid segs y-segs))
-                    append gcode
+                    with inner-round = (inner-round x l e fh mid)
+                    append (if (or (not double-wall) (> (* 12 e) (- (- (* l (sqrt 2)) h) z)))
+                               gcode
+                               (append gcode inner-round))
                     do (setf (values gcode x z) (spir x z l h lh e fl fh mid segs y-segs))
+                       (setf inner-round (inner-round x l e fh mid))
                     while (< z (- (* l (sqrt 2)) h)))
-              (last-gcodes)))))
+              (last-gcodes))))
 
 (defun print-gcodes (gcodes &optional (stream t))
   (loop for gcode in gcodes
@@ -166,9 +181,22 @@
                         (format stream " ~a" param)))
            (format stream "~%")))
 
-(with-open-file (s "~/Desktop/logo.gcode" :if-does-not-exist :create
-                                          :if-exists :supersede
-                                          :direction :output)
-  (print-gcodes (full-gcode) s))
-
-
+(defun make-gcode (filename)
+  (with-open-file (s filename :if-does-not-exist :create
+                              :if-exists :supersede
+                              :direction :output)
+    (let ((l 100)
+          (h 10)
+          (lh 0.35)
+          (e 0.13)
+          (fl 800)
+          (fh 2500)
+          (mid 100)
+          (segs 8)
+          (y-segs 5)
+          (double-wall t))
+      (format s "; Gcode generated by standing-speed-diff-cube.lisp~%")
+      (format s
+             "; l ~a~%; h ~a~%; lh ~a~%; e ~a~%; fl ~a~%; fh ~a~%; mid ~a~%; segs ~a~%; y-segs ~a~%; double-wall ~a~%"
+              l h lh e fl fh mid segs y-segs double-wall)
+      (print-gcodes (full-gcode l h lh e fl fh mid segs y-segs :double-wall double-wall) s))))
